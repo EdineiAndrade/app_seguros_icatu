@@ -20,8 +20,13 @@ class LoginManager:
         self.janela.title("Autenticação")
         self.janela.resizable(False, False)
 
-        # Frame principal
+        # Centraliza a janela na tela do computador
+        self.janela.eval('tk::PlaceWindow . center')
+
+        # Centraliza o frame dentro da janela
         frame = tk.Frame(self.janela, padx=20, pady=20)
+        frame.place(relx=0.5, rely=0.5, anchor=tk.CENTER)
+        # Frame principal
         frame.pack()
 
         # Widgets

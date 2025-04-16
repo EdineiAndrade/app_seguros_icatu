@@ -7,6 +7,9 @@ from selenium.webdriver.edge.service import Service as EdgeService
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import TimeoutException
 
 import pandas as pd
 
@@ -38,10 +41,10 @@ def importar_dados():
             df['Código do Cliente'] = df['Código do Cliente'].str.replace(
                 '-', '')
             df = df[['Código do Cliente', 'Cliente', 'CPF']]
-            num_linhas = df.shape[0]
+
             print(f"Arquivo selecionado: {arquivo}")
 
-            return df, num_linhas
+            return df
         else:
             print("Nenhum arquivo selecionado.")
             return None, 0
@@ -72,9 +75,8 @@ def config_driver():
         raise
 
 
-def login_icatu(driver):
+def login_icatu(driver, credenciais):
     # Obter credenciais
-    credenciais = obter_credenciais()
 
     if credenciais:
         usuario, senha = credenciais
@@ -86,9 +88,15 @@ def login_icatu(driver):
         # Usar no Selenium
         driver.find_element(By.ID, 'mat-input-0').send_keys(usuario)
         driver.find_element(By.ID, 'mat-input-1').send_keys(senha)
-        driver.find_element(By.CSS_SELECTOR, 'span.Login_btn > a.BTN_btn--principal').click()
+        driver.find_element(
+            By.CSS_SELECTOR, 'span.Login_btn > a.BTN_btn--principal').click()
 
-        driver.find_element(By.CSS_SELECTOR, 'span.Login_btn > a.BTN_btn--principal').click()
+        timeout = 10  # Define a timeout value in seconds
+        botao = WebDriverWait(driver, timeout).until(
+            EC.element_to_be_clickable(
+                (By.CSS_SELECTOR, "button.btn-cancel.mat-button"))
+        )
+        botao.click()
 
     else:
         print("Login cancelado")
@@ -96,31 +104,135 @@ def login_icatu(driver):
 
 def buscar_clientes(driver, dados_excel):
     try:
-        dados_s400 = buscar_s400(driver, dados_excel)
-        links = emitir_seguros(driver, dados_s400)
-        baixar_seguros(links)
+        # Verifica se dados_excel é um DataFrame e se tem dados
+        if dados_excel.empty:
+            raise ValueError(
+                "Dados de entrada não são um DataFrame válido ou estão vazios")
+        # Verifica se a coluna necessária existe
+        # Substitua pelo nome da sua coluna de iteração (ex: 'CNPJ', 'ID', etc.)
+        num_linhas = dados_excel.shape[0]
+        print(f"Número de linhas a serem processadas: {num_linhas}")
+        coluna_chave = 'Código do Cliente'
+        if coluna_chave not in dados_excel.columns:
+            raise KeyError(
+                f"Coluna '{coluna_chave}' não encontrada no DataFrame")
+
+        # Lista para armazenar resultados
+        resultados = []
+
+        # Itera sobre cada linha do DataFrame
+        for index, linha in dados_excel.iterrows():
+            try:
+                # Extrai o valor da coluna chave
+                valor_chave = linha[coluna_chave]
+                print(f"\nProcessando: {valor_chave}")
+
+                # Busca dados no S400 (adaptar conforme sua função)
+                # Passa a linha inteira ou só o valor necessário
+                dados_s400 = buscar_s400(driver, linha)
+
+                # Emite seguros (adaptar conforme sua função)
+                links = emitir_seguros(driver, dados_s400)
+
+                # Baixa documentos (se aplicável)
+                if links:
+                    baixar_seguros(links)
+
+                # Adiciona resultado à lista
+                resultados.append({
+                    'chave': valor_chave,
+                    'status': 'Sucesso',
+                    'links': links
+                })
+
+            except Exception as e:
+                print(f"Erro ao processar {valor_chave}: {str(e)}")
+                resultados.append({
+                    'chave': valor_chave,
+                    'status': 'Erro',
+                    'erro': str(e)
+                })
+
+        # Retorna resultados como DataFrame
+        return pd.DataFrame(resultados)
+
     except Exception as e:
-        print(f"Erro ao buscar clientes: {e}")
+        print(f"Erro geral na execução: {str(e)}")
+        raise  # Re-lança a exceção para tratamento externo
 
 
 def emitir_seguros(driver, dados_s400):
     try:
-        
-        time.sleep(2)  # Aguarda o carregamento da página
 
-        driver.find_element(By.ID, 'gale').send_keys('2G')
-        driver.find_element(By.ID, 'data_candles').send_keys(
-            'EURUSD 10:00 CALL\nEURUSD 10:06 CALL\nEURUSD 10:10 CALL\nEURUSD 10:12 PUT\nEURUSD 10:15 PUT')
-        driver.execute_script("document.body.style.zoom='50%'")
+        time.sleep(2)  # Aguarda o carregamento da página
+        driver.execute_script("document.body.style.zoom='80%'")
+        driver.find_element(
+            By.XPATH, '/html/body/app-root/app-seguro-bnb/div[1]/div[2]/div[2]/div/div[8]/div/a').click()
+        WebDriverWait(driver, 10).until(
+            EC.element_to_be_clickable(
+                (By.ID, 'mat-input-10'))
+        )
+        driver.find_element(By.ID, 'mat-input-10').send_keys(dados_s400['CPF'])
         time.sleep(2)
-        driver.find_element(By.ID, 'get_candles').click()
+        driver.find_element(
+            By.ID, 'mat-select-3').send_keys(dados_s400['ECIVIL'])
+        driver.find_element(By.ID, 'mat-input-15').send_keys('Agricultor')
+        driver.find_element(By.XPATH, '//*[@id="mat-option-159"]/span').click()
+        driver.find_element(By.ID, 'mat-input-16').clear()
+        driver.find_element(
+            By.ID, 'mat-input-16').send_keys(dados_s400['RENDA'])
+        driver.find_element(By.ID, 'mat-input-17').clear()
+        driver.find_element(By.ID, 'mat-input-17').send_keys(dados_s400['RG'])
+        driver.find_element(By.ID, 'mat-input-18').clear()
+        driver.find_element(
+            By.ID, 'mat-input-18').send_keys(dados_s400['ESPEDICAO'])
+        driver.find_element(By.ID, 'mat-input-19').clear()
+        driver.find_element(
+            By.ID, 'mat-input-19').send_keys(dados_s400['ORGESPEDICAO'])
+
+        # TRATAR OD DADOS DE UF ANTES
+        driver.find_element(By.ID, 'mat-select-5').send_keys(dados_s400['UF'])
+
+        driver.find_element(By.ID, 'mat-input-20').clear()
+        driver.find_element(
+            By.ID, 'mat-input-20').send_keys(dados_s400['telefone'])
+
+        driver.find_element(By.ID, 'mat-input-21').clear()
+        driver.find_element(
+            By.ID, 'mat-input-21').send_keys(dados_s400['email'])
+
         time.sleep(2)
+        # ir para próxima página
+        driver.find_element(
+            By.XPATH, '//*[@id="mat-tab-content-0-0"]/div/form/div[12]/span[2]/a').click()
+
+        # página de CEP
+        driver.find_element(By.ID, 'mat-input-2').send_keys(dados_s400['CEP'])
+        driver.find_element(
+            By.ID, 'mat-input-3').send_keys(dados_s400['ENDERECO'])
+        driver.find_element(
+            By.ID, 'mat-input-4').send_keys(dados_s400['NUMERO'])
+        driver.find_element(
+            By.ID, 'mat-input-6').send_keys(dados_s400['BAIRRO'])
+        time.sleep(2)
+        driver.find_element(
+            By.XPATH, '//*[@id="mat-tab-content-0-1"]/div/app-address-data/div[2]/span[2]/a').click()
+        time.sleep(2)
+        driver.find_element(
+            By.XPATH, '//*[@id="mat-tab-content-0-2"]/div/app-payment-details/div[2]/span[2]/a').click()
+        time.sleep(2)
+        driver.find_element(
+            By.XPATH, '//*[@id="mat-tab-content-0-3"]/div/app-signature/div/div[1]/div[2]/button[1]/span').click()
+        time.sleep(2)
+        driver.find_element(
+            By.XPATH, '//*[@id="mat-dialog-1"]/app-modal-dialog-common/div/div[2]/button[2]').click()
+        time.sleep(2)
+        driver.find_element(
+            By.XPATH, '//*[@id="mat-tab-content-0-4"]/div/app-conclusion/div[7]/span[2]/a').click()
         driver.execute_script(
             "window.scrollTo(0, document.body.scrollHeight);")
         time.sleep(2)
         driver.find_element(By.ID, 'button_modal').click()
-        time.sleep(2)
-        texto = driver.find_element(By.ID, 'text_export').text
 
     except Exception as e:
         return f"Erro na busca dos dados: {e}"
@@ -161,19 +273,19 @@ def buscar_s400(driver, sicad):
     except Exception as e:
         return {
             'NOME': 'João Silva',
-            'CPF': '05231576573',
-            'SEXO': 'M',
+            'CPF': '095.103.405-70',
             'ECIVIL': 'Solteiro',
-            'DTNACIMENTO': '15-05-1990',
             'RENDA': 3500.50,
             'RG': '1234567',
             'ESPEDICAO': '10-02-2015',
             'ORGESPEDICAO': 'SSP/SP',
             'MUNICIPIO': 'São Paulo',
-            'CEP': '01234567',
+            'CEP': '46650000',
             'ENDERECO': 'Rua das Flores, 123',
             'BAIRRO': 'Centro',
-            'UF': 'SP'
+            'UF': 'Bahia',
+            'telefone': '77999272367',
+            'email': ''
         }
 
 
@@ -214,10 +326,15 @@ def print_arquivos(texto):
 
 if __name__ == "__main__":
     # Exemplo de uso
-    # dados_excel = importar_dados()
+    print("Iniciando o processo...")
+    print("Importando dados do Excel...")
+    dados_excel = importar_dados()
+    print("Coletando dados de Usuário e Senha...")
+    credenciais = obter_credenciais()
+    print("Abrindo navegador Edge...")
     driver = config_driver()
-    login_icatu(driver)
-    buscar_clientes(driver, dados_excel)
-    texto = baixar_seguros()
-    caminho_salvo = print_arquivos(texto)
-    print(f"Arquivo salvo com sucesso em: {caminho_salvo}")
+    print("Fazendo login na Icatu...")
+    login_icatu(driver, credenciais)
+    print("Buscando clientes...")
+    resultado = buscar_clientes(driver, dados_excel)
+    print(f"Processo finalizado com sucesso!")
